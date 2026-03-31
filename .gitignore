@@ -1,0 +1,36 @@
+# Backend
+backend/target/
+backend/*.jar
+backend/.mvn/
+backend/mvnw
+backend/mvnw.cmd
+
+# Frontend
+frontend-admin/node_modules/
+frontend-admin/dist/
+frontend-admin/.vite/
+frontend-user/node_modules/
+frontend-user/dist/
+frontend-user/.vite/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env.local
+.env.*.local
+
+# Docker
+mysql_data/
