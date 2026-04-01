@@ -137,9 +137,10 @@ public class BookingService {
     /**
      * 更新预订状态
      * <p>
-     * 当状态从已入住(CHECKED_IN)变更为已完成(COMPLETED)时，
-     * 系统会自动释放房间的可用状态，该房间在后续日期可以被正常预订。
-     * 房间可用性通过冲突检测SQL自动过滤已完成和已取消状态的预订。
+     * 状态流转时同步更新房间的可用状态：
+     * 1. 当状态从已确认(CONFIRMED)变更为已入住(CHECKED_IN)时，自动将房间标记为不可用
+     * 2. 当状态从已入住(CHECKED_IN)变更为已完成(COMPLETED)时，自动将房间恢复为可用状态
+     * 房间可用性通过双重机制保障：房间本身状态 + 冲突检测SQL过滤已完成和已取消状态的预订。
      * </p>
      *
      * @param id 预订ID
@@ -161,8 +162,19 @@ public class BookingService {
         log.info("更新预订状态: id={}, {} -> {}", id,
             currentStatus.getDescription(), newStatus.getDescription());
 
-        if (currentStatus == BookingStatus.CHECKED_IN && newStatus == BookingStatus.COMPLETED) {
-            log.info("预订已完成，释放房间可用状态: bookingId={}, roomId={}, 该房间后续日期可正常预订", id, booking.getRoomId());
+        Room room = roomMapper.selectById(booking.getRoomId());
+        if (room != null) {
+            if (currentStatus == BookingStatus.CONFIRMED && newStatus == BookingStatus.CHECKED_IN) {
+                room.setStatus(0);
+                roomMapper.updateById(room);
+                log.info("客人已入住，标记房间为不可用: bookingId={}, roomId={}, roomName={}", id, room.getId(), room.getName());
+            }
+
+            if (currentStatus == BookingStatus.CHECKED_IN && newStatus == BookingStatus.COMPLETED) {
+                room.setStatus(1);
+                roomMapper.updateById(room);
+                log.info("预订已完成，释放房间可用状态: bookingId={}, roomId={}, roomName={}, 该房间后续日期可正常预订", id, room.getId(), room.getName());
+            }
         }
     }
 
