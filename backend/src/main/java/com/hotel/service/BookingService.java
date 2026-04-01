@@ -26,19 +26,48 @@ public class BookingService {
     private final BookingMapper bookingMapper;
     private final RoomMapper roomMapper;
 
+    /**
+     * 分页查询预订列表
+     *
+     * @param current 当前页码
+     * @param size 每页大小
+     * @param userId 用户ID，null表示查询所有用户
+     * @param status 预订状态，null表示查询所有状态
+     * @return 分页结果
+     */
     public PageResult<Booking> page(int current, int size, Long userId, Integer status) {
         Page<Booking> page = new Page<>(current, size);
         return PageResult.of(bookingMapper.selectPageWithDetail(page, userId, status));
     }
 
+    /**
+     * 查询当前用户的预订列表
+     *
+     * @param current 当前页码
+     * @param size 每页大小
+     * @param status 预订状态，null表示查询所有状态
+     * @return 分页结果
+     */
     public PageResult<Booking> myBookings(int current, int size, Integer status) {
         return page(current, size, UserContext.getUserId(), status);
     }
 
+    /**
+     * 根据ID查询预订详情
+     *
+     * @param id 预订ID
+     * @return 预订详情
+     */
     public Booking getById(Long id) {
         return bookingMapper.selectWithDetail(id);
     }
 
+    /**
+     * 创建预订
+     *
+     * @param request 预订请求参数
+     * @throws BusinessException 当房间不可用、日期不合法或存在冲突预订时抛出
+     */
     public void create(BookingRequest request) {
         Room room = roomMapper.selectById(request.getRoomId());
         if (room == null || room.getStatus() != 1) {
@@ -82,6 +111,12 @@ public class BookingService {
             request.getCheckInDate(), request.getCheckOutDate());
     }
 
+    /**
+     * 取消预订
+     *
+     * @param id 预订ID
+     * @throws BusinessException 当预订不存在、无权限或状态流转不合法时抛出
+     */
     public void cancel(Long id) {
         Booking booking = bookingMapper.selectById(id);
         if (booking == null) {
@@ -99,6 +134,19 @@ public class BookingService {
         log.info("取消预订: id={}", id);
     }
 
+    /**
+     * 更新预订状态
+     * <p>
+     * 状态流转时同步更新房间的可用状态：
+     * 1. 当状态从已确认(CONFIRMED)变更为已入住(CHECKED_IN)时，自动将房间标记为不可用
+     * 2. 当状态从已入住(CHECKED_IN)变更为已完成(COMPLETED)时，自动将房间恢复为可用状态
+     * 房间可用性通过双重机制保障：房间本身状态 + 冲突检测SQL过滤已完成和已取消状态的预订。
+     * </p>
+     *
+     * @param id 预订ID
+     * @param newStatus 目标状态
+     * @throws BusinessException 当预订不存在或状态流转不合法时抛出
+     */
     public void updateStatus(Long id, BookingStatus newStatus) {
         Booking booking = bookingMapper.selectById(id);
         if (booking == null) {
@@ -110,8 +158,24 @@ public class BookingService {
 
         booking.setStatus(newStatus.getCode());
         bookingMapper.updateById(booking);
+
         log.info("更新预订状态: id={}, {} -> {}", id,
             currentStatus.getDescription(), newStatus.getDescription());
+
+        Room room = roomMapper.selectById(booking.getRoomId());
+        if (room != null) {
+            if (currentStatus == BookingStatus.CONFIRMED && newStatus == BookingStatus.CHECKED_IN) {
+                room.setStatus(0);
+                roomMapper.updateById(room);
+                log.info("客人已入住，标记房间为不可用: bookingId={}, roomId={}, roomName={}", id, room.getId(), room.getName());
+            }
+
+            if (currentStatus == BookingStatus.CHECKED_IN && newStatus == BookingStatus.COMPLETED) {
+                room.setStatus(1);
+                roomMapper.updateById(room);
+                log.info("预订已完成，释放房间可用状态: bookingId={}, roomId={}, roomName={}, 该房间后续日期可正常预订", id, room.getId(), room.getName());
+            }
+        }
     }
 
     /**
