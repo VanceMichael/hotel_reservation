@@ -26,19 +26,44 @@ public class BookingService {
     private final BookingMapper bookingMapper;
     private final RoomMapper roomMapper;
 
+    /**
+     * 分页查询预订列表
+     * @param current 当前页码
+     * @param size 每页大小
+     * @param userId 用户ID（可选，用于过滤特定用户的预订）
+     * @param status 预订状态（可选，用于过滤特定状态的预订）
+     * @return 分页预订结果
+     */
     public PageResult<Booking> page(int current, int size, Long userId, Integer status) {
         Page<Booking> page = new Page<>(current, size);
         return PageResult.of(bookingMapper.selectPageWithDetail(page, userId, status));
     }
 
+    /**
+     * 查询当前登录用户的预订列表
+     * @param current 当前页码
+     * @param size 每页大小
+     * @param status 预订状态（可选，用于过滤特定状态的预订）
+     * @return 分页预订结果
+     */
     public PageResult<Booking> myBookings(int current, int size, Integer status) {
         return page(current, size, UserContext.getUserId(), status);
     }
 
+    /**
+     * 根据ID查询预订详情
+     * @param id 预订ID
+     * @return 预订详情（包含房间和用户信息）
+     */
     public Booking getById(Long id) {
         return bookingMapper.selectWithDetail(id);
     }
 
+    /**
+     * 创建新预订
+     * 校验房间可用性、日期合法性、日期范围冲突后创建预订
+     * @param request 预订请求参数
+     */
     public void create(BookingRequest request) {
         Room room = roomMapper.selectById(request.getRoomId());
         if (room == null || room.getStatus() != 1) {
@@ -82,6 +107,11 @@ public class BookingService {
             request.getCheckInDate(), request.getCheckOutDate());
     }
 
+    /**
+     * 取消预订
+     * 校验操作权限和状态流转合法性后取消预订，并同步释放房间可用状态
+     * @param id 预订ID
+     */
     public void cancel(Long id) {
         Booking booking = bookingMapper.selectById(id);
         if (booking == null) {
@@ -96,9 +126,24 @@ public class BookingService {
 
         booking.setStatus(BookingStatus.CANCELLED.getCode());
         bookingMapper.updateById(booking);
+
+        Room room = roomMapper.selectById(booking.getRoomId());
+        if (room != null) {
+            room.setStatus(1);
+            roomMapper.updateById(room);
+            log.info("释放房间可用状态: roomId={}", booking.getRoomId());
+        }
+
         log.info("取消预订: id={}", id);
     }
 
+    /**
+     * 更新预订状态
+     * 校验状态流转合法性后更新预订状态，当状态变更为已完成(COMPLETED)或已取消(CANCELLED)时，
+     * 同步释放房间的可用状态；当变更为已入住(CHECKED_IN)时，标记房间为占用状态
+     * @param id 预订ID
+     * @param newStatus 目标状态
+     */
     public void updateStatus(Long id, BookingStatus newStatus) {
         Booking booking = bookingMapper.selectById(id);
         if (booking == null) {
@@ -110,6 +155,20 @@ public class BookingService {
 
         booking.setStatus(newStatus.getCode());
         bookingMapper.updateById(booking);
+
+        Room room = roomMapper.selectById(booking.getRoomId());
+        if (room != null) {
+            if (newStatus == BookingStatus.COMPLETED || newStatus == BookingStatus.CANCELLED) {
+                room.setStatus(1);
+                roomMapper.updateById(room);
+                log.info("释放房间可用状态: roomId={}", booking.getRoomId());
+            } else if (newStatus == BookingStatus.CHECKED_IN) {
+                room.setStatus(0);
+                roomMapper.updateById(room);
+                log.info("标记房间为占用状态: roomId={}", booking.getRoomId());
+            }
+        }
+
         log.info("更新预订状态: id={}, {} -> {}", id,
             currentStatus.getDescription(), newStatus.getDescription());
     }
