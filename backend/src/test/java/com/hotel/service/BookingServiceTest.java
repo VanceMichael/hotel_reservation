@@ -185,12 +185,88 @@ class BookingServiceTest {
         Booking booking1 = buildBooking(BookingStatus.CONFIRMED);
         when(bookingMapper.selectById(1L)).thenReturn(booking1);
         when(bookingMapper.updateById(any())).thenReturn(1);
+        when(roomMapper.selectById(1L)).thenReturn(availableRoom);
         assertDoesNotThrow(() -> bookingService.updateStatus(1L, BookingStatus.CHECKED_IN));
 
         // 已入住 -> 已完成
         Booking booking2 = buildBooking(BookingStatus.CHECKED_IN);
         when(bookingMapper.selectById(2L)).thenReturn(booking2);
+        when(roomMapper.selectById(1L)).thenReturn(availableRoom);
         assertDoesNotThrow(() -> bookingService.updateStatus(2L, BookingStatus.COMPLETED));
+    }
+
+    // ==================== 房间状态同步更新 ====================
+
+    @Test
+    @DisplayName("已入住 -> 已完成：应释放房间为可用状态")
+    void updateStatus_checkedInToCompleted_shouldUpdateRoomStatus() {
+        Booking booking = buildBooking(BookingStatus.CHECKED_IN);
+        Room occupiedRoom = new Room();
+        occupiedRoom.setId(1L);
+        occupiedRoom.setStatus(0);
+
+        when(bookingMapper.selectById(1L)).thenReturn(booking);
+        when(bookingMapper.updateById(any())).thenReturn(1);
+        when(roomMapper.selectById(1L)).thenReturn(occupiedRoom);
+
+        bookingService.updateStatus(1L, BookingStatus.COMPLETED);
+
+        ArgumentCaptor<Room> roomCaptor = ArgumentCaptor.forClass(Room.class);
+        verify(roomMapper).updateById(roomCaptor.capture());
+        assertEquals(1, roomCaptor.getValue().getStatus());
+    }
+
+    @Test
+    @DisplayName("已确认 -> 已取消：应释放房间为可用状态")
+    void updateStatus_confirmedToCancelled_shouldUpdateRoomStatus() {
+        Booking booking = buildBooking(BookingStatus.CONFIRMED);
+        Room occupiedRoom = new Room();
+        occupiedRoom.setId(1L);
+        occupiedRoom.setStatus(0);
+
+        when(bookingMapper.selectById(1L)).thenReturn(booking);
+        when(bookingMapper.updateById(any())).thenReturn(1);
+        when(roomMapper.selectById(1L)).thenReturn(occupiedRoom);
+
+        bookingService.updateStatus(1L, BookingStatus.CANCELLED);
+
+        ArgumentCaptor<Room> roomCaptor = ArgumentCaptor.forClass(Room.class);
+        verify(roomMapper).updateById(roomCaptor.capture());
+        assertEquals(1, roomCaptor.getValue().getStatus());
+    }
+
+    @Test
+    @DisplayName("已确认 -> 已入住：应标记房间为占用状态")
+    void updateStatus_confirmedToCheckedIn_shouldMarkRoomOccupied() {
+        Booking booking = buildBooking(BookingStatus.CONFIRMED);
+        when(bookingMapper.selectById(1L)).thenReturn(booking);
+        when(bookingMapper.updateById(any())).thenReturn(1);
+        when(roomMapper.selectById(1L)).thenReturn(availableRoom);
+
+        bookingService.updateStatus(1L, BookingStatus.CHECKED_IN);
+
+        ArgumentCaptor<Room> roomCaptor = ArgumentCaptor.forClass(Room.class);
+        verify(roomMapper).updateById(roomCaptor.capture());
+        assertEquals(0, roomCaptor.getValue().getStatus());
+    }
+
+    @Test
+    @DisplayName("取消预订：应释放房间为可用状态")
+    void cancel_shouldUpdateRoomStatus() {
+        Booking booking = buildBooking(BookingStatus.CONFIRMED);
+        Room occupiedRoom = new Room();
+        occupiedRoom.setId(1L);
+        occupiedRoom.setStatus(0);
+
+        when(bookingMapper.selectById(1L)).thenReturn(booking);
+        when(bookingMapper.updateById(any())).thenReturn(1);
+        when(roomMapper.selectById(1L)).thenReturn(occupiedRoom);
+
+        bookingService.cancel(1L);
+
+        ArgumentCaptor<Room> roomCaptor = ArgumentCaptor.forClass(Room.class);
+        verify(roomMapper).updateById(roomCaptor.capture());
+        assertEquals(1, roomCaptor.getValue().getStatus());
     }
 
     // ==================== 房间不可用 ====================
